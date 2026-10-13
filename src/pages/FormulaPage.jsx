@@ -1,0 +1,882 @@
+import React, { useMemo, useState } from 'react';
+import { useDatabase } from '../context/DatabaseContext';
+import { normalizeDecimalInput } from '../lib/numberInput';
+import { Scale, Plus, Trash2, PackageCheck, DollarSign, Layers, CalendarClock, Zap, Info, ArrowRightLeft, ChevronDown, ChevronUp, Bookmark, FolderOpen, Search, Check } from 'lucide-react';
+export const FormulaPage = () => {
+    const { db, t, lang, saveFormulaTemplate, createFormulaAndProduce, deleteFormula, getLocalizedName } = useDatabase();
+    const [loadedFormulaId, setLoadedFormulaId] = useState(null);
+    const [formulaName, setFormulaName] = useState('');
+    const [description, setDescription] = useState('');
+    const [operatorName, setOperatorName] = useState('');
+    const [batchExpenses, setBatchExpenses] = useState('');
+    const [batchExpenseCurrency, setBatchExpenseCurrency] = useState('AFN');
+    const [productionUnit, setProductionUnit] = useState('ton');
+    const [productionQuantity, setProductionQuantity] = useState('');
+    // Ingredients list in formulation
+    const [ingredients, setIngredients] = useState([
+        { rawMaterialId: db.rawMaterials[0]?.id || '', weightKg: 500 },
+        { rawMaterialId: db.rawMaterials[1]?.id || '', weightKg: 300 },
+        { rawMaterialId: db.rawMaterials[2]?.id || '', weightKg: 150 },
+        { rawMaterialId: db.rawMaterials[3]?.id || '', weightKg: 50 },
+    ]);
+    const [message, setMessage] = useState(null);
+    const [processStatus, setProcessStatus] = useState(null);
+    const [isProducing, setIsProducing] = useState(false);
+    // In-app delete formula confirmation
+    const [formulaToDelete, setFormulaToDelete] = useState(null);
+    // Multi-unit display toggles: 'all' | 'ton' | 'bag' | 'kg'
+    const [stockViewUnit, setStockViewUnit] = useState('all');
+    // Quick Unit Converter state
+    const [showConverter, setShowConverter] = useState(false);
+    const [showOptionalDetails, setShowOptionalDetails] = useState(false);
+    const [convTons, setConvTons] = useState(1);
+    const [convBags, setConvBags] = useState(20);
+    const [convKg, setConvKg] = useState(1000);
+    const handleTonsChange = (val) => {
+        setConvTons(val);
+        if (val === '' || isNaN(Number(val))) {
+            setConvBags('');
+            setConvKg('');
+        }
+        else {
+            const num = Number(val);
+            setConvKg(Math.round(num * 1000 * 100) / 100);
+            setConvBags(Math.round(num * 20 * 10) / 10);
+        }
+    };
+    const handleBagsChange = (val) => {
+        setConvBags(val);
+        if (val === '' || isNaN(Number(val))) {
+            setConvTons('');
+            setConvKg('');
+        }
+        else {
+            const num = Number(val);
+            setConvKg(Math.round(num * 50 * 100) / 100);
+            setConvTons(Math.round((num / 20) * 1000) / 1000);
+        }
+    };
+    const handleKgChange = (val) => {
+        setConvKg(val);
+        if (val === '' || isNaN(Number(val))) {
+            setConvTons('');
+            setConvBags('');
+        }
+        else {
+            const num = Number(val);
+            setConvTons(Math.round((num / 1000) * 1000) / 1000);
+            setConvBags(Math.round((num / 50) * 10) / 10);
+        }
+    };
+    const handleAddIngredientRow = () => {
+        const defaultRm = db.rawMaterials[0]?.id || '';
+        setIngredients(prev => [...prev, { rawMaterialId: defaultRm, weightKg: 100 }]);
+    };
+    const handleRemoveIngredientRow = (index) => {
+        setIngredients(prev => prev.filter((_, i) => i !== index));
+    };
+    const handleUpdateIngredient = (index, field, val) => {
+        setIngredients(prev => {
+            const updated = [...prev];
+            updated[index] = { ...updated[index], [field]: val };
+            return updated;
+        });
+    };
+    // Calculations keep AFN and USD independent.
+    let totalBatchWeight = 0;
+    const totalRawMaterialCost = { AFN: 0, USD: 0 };
+    ingredients.forEach(ing => {
+        const raw = db.rawMaterials.find(r => r.id === ing.rawMaterialId);
+        const weight = Number(ing.weightKg) || 0;
+        totalBatchWeight += weight;
+        if (raw) totalRawMaterialCost[raw.currency === 'USD' ? 'USD' : 'AFN'] += raw.unitPrice * weight;
+    });
+    const productionUnitKg = productionUnit === 'ton' ? 1000 : productionUnit === 'bag' ? 50 : 1;
+    const requestedProductionKg = (Number(productionQuantity) || 0) * productionUnitKg;
+    const productionScale = totalBatchWeight > 0 ? requestedProductionKg / totalBatchWeight : 0;
+    const scaledIngredients = ingredients.map(ingredient => ({
+        ...ingredient,
+        weightKg: (Number(ingredient.weightKg) || 0) * productionScale,
+    }));
+    const scaledRawMaterialCost = {
+        AFN: totalRawMaterialCost.AFN * productionScale,
+        USD: totalRawMaterialCost.USD * productionScale,
+    };
+    const batchExpenseAmount = Number(batchExpenses) || 0;
+    const totalBatchCost = { ...scaledRawMaterialCost };
+    totalBatchCost[batchExpenseCurrency] += batchExpenseAmount;
+    const costPerKg = { AFN: requestedProductionKg > 0 ? totalBatchCost.AFN / requestedProductionKg : 0, USD: requestedProductionKg > 0 ? totalBatchCost.USD / requestedProductionKg : 0 };
+    const costPerBag = { AFN: costPerKg.AFN * 50, USD: costPerKg.USD * 50 };
+    const costPerTon = { AFN: costPerKg.AFN * 1000, USD: costPerKg.USD * 1000 };
+    const totalBags = Math.round((requestedProductionKg / 50) * 100) / 100;
+    const totalTons = requestedProductionKg / 1000;
+    const totalProcessedKg = db.processedStock.reduce((acc, p) => acc + (p.stockKg || 0), 0);
+    const totalProcessedTons = totalProcessedKg / 1000;
+    const totalProcessedBags = Math.round((totalProcessedKg / 50) * 100) / 100;
+    const totalProcessedValue = db.processedStock.reduce((acc, p) => { acc.AFN += (p.stockKg || 0) * (p.averageCostPerKg || 0); acc.USD += (p.stockKg || 0) * (p.averageCostPerKgUsd || 0); return acc; }, { AFN: 0, USD: 0 });
+    const handleLoadFormula = (formula) => {
+        setLoadedFormulaId(formula.id);
+        setFormulaName(formula.name);
+        setDescription(formula.description || '');
+        setIngredients(formula.ingredients.map(ingredient => ({
+            rawMaterialId: ingredient.rawMaterialId,
+            weightKg: ingredient.weightKg,
+        })));
+        setProductionQuantity('');
+        setMessage({
+            type: 'success',
+            text: lang === 'fa' ? 'فرمول ذخیره‌شده بارگذاری شد.' : lang === 'ps' ? 'خوندي شوی فورمول پورته شو.' : 'Saved formula loaded.',
+        });
+    };
+    const handleSaveFormula = async () => {
+        setMessage(null);
+        const result = await saveFormulaTemplate(formulaName, ingredients, description.trim() || undefined, loadedFormulaId || undefined);
+        if (result.success) {
+            setLoadedFormulaId(result.formulaId);
+            setMessage({
+                type: 'success',
+                text: lang === 'fa' ? 'فرمول در دیتابیس ذخیره شد.' : lang === 'ps' ? 'فورمول په ډیټابیس کې خوندي شو.' : 'Formula saved to the database.',
+            });
+        }
+        else {
+            setMessage({ type: 'error', text: result.error || 'Could not save formula.' });
+        }
+    };
+    const handleProduce = async (e) => {
+        e.preventDefault();
+        setProcessStatus(null);
+        if (!formulaName.trim()) {
+            setProcessStatus({ type: 'error', text: t.pleaseEnterFormulaName });
+            return;
+        }
+        if (totalBatchWeight <= 0) {
+            setProcessStatus({ type: 'error', text: t.totalWeightMustBePositive });
+            return;
+        }
+        if (requestedProductionKg <= 0) {
+            setProcessStatus({ type: 'error', text: t.productionAmountMustBePositive });
+            return;
+        }
+        // Check if we have enough raw materials in stock
+        for (const ing of scaledIngredients) {
+            const raw = db.rawMaterials.find(r => r.id === ing.rawMaterialId);
+            if (!raw) {
+                setProcessStatus({ type: 'error', text: t.invalidRawMaterialSelected });
+                return;
+            }
+            if (raw.stockKg < ing.weightKg) {
+                setProcessStatus({
+                    type: 'error',
+                    text: `${t.insufficientStockOfItem} "${getLocalizedName(raw.name)}" - ${raw.stockKg.toLocaleString()} ${t.kilo}, ${t.requestedAmount} ${ing.weightKg.toLocaleString()} ${t.kilo}.`
+                });
+                return;
+            }
+        }
+        setIsProducing(true);
+        const result = await createFormulaAndProduce(formulaName.trim(), scaledIngredients, description.trim() || undefined, operatorName.trim() || undefined, true, batchExpenseAmount, loadedFormulaId, batchExpenseCurrency);
+        setIsProducing(false);
+        if (result.success) {
+            setProcessStatus({
+                type: 'success',
+                text: lang === 'fa' ? 'پروسس با موفقیت در دیتابیس ذخیره شد.' : lang === 'ps' ? 'پروسس په بریالیتوب سره ډیټابیس کې خوندي شو.' : 'Process saved to the database successfully.'
+            });
+            // Reset form
+            setFormulaName('');
+            setDescription('');
+            setOperatorName('');
+            setBatchExpenses('');
+            setProductionQuantity('');
+            setLoadedFormulaId(null);
+        }
+        else {
+            setProcessStatus({
+                type: 'error',
+                text: result.error || (lang === 'fa' ? 'پروسس در دیتابیس ذخیره نشد.' : lang === 'ps' ? 'پروسس په ډیټابیس کې خوندي نه شو.' : 'Process was not saved to the database.'),
+            });
+        }
+    };
+    const handleConfirmDeleteFormula = () => {
+        if (formulaToDelete) {
+            deleteFormula(formulaToDelete);
+            setFormulaToDelete(null);
+        }
+    };
+    return (<div className="flex flex-col gap-6">
+      {/* Header */}
+      <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2.5">
+            <div className="p-2 rounded-xl bg-amber-100 text-amber-700">
+              <Scale className="w-5 h-5"/>
+            </div>
+            <span>{t.formulaTitle}</span>
+          </h2>
+          <p className="text-xs sm:text-sm text-slate-600 mt-1">
+            {t.formulaDesc}
+          </p>
+        </div>
+
+        {/* Optional unit converter */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Quick Unit Converter Toggle Button */}
+          <button type="button" onClick={() => setShowConverter(!showConverter)} className="px-3 py-1.5 rounded-xl border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-800 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs">
+            <ArrowRightLeft className="w-3.5 h-3.5 text-amber-700"/>
+            <span>{t.unitConverter}</span>
+            {showConverter ? <ChevronUp className="w-3.5 h-3.5"/> : <ChevronDown className="w-3.5 h-3.5"/>}
+          </button>
+
+        </div>
+      </div>
+
+      {/* Interactive Quick Unit Converter Box (Tons <-> Bags <-> Kg) */}
+      {showConverter && (<div className="p-4 bg-gradient-to-r from-amber-50 to-orange-50 rounded-2xl border border-amber-200 shadow-sm transition-all animate-fadeIn">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-amber-200/80">
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 bg-amber-600 text-white rounded-lg shadow-xs">
+                <ArrowRightLeft className="w-4 h-4"/>
+              </div>
+              <h4 className="font-bold text-sm text-amber-950">
+                {t.unitConverterTitle}
+              </h4>
+            </div>
+            <div className="text-[11px] font-mono font-medium text-amber-800 bg-amber-100/80 px-2.5 py-1 rounded-lg border border-amber-200">
+              {t.standardConversionRule}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-3">
+            {/* Tons Input */}
+            <div className="bg-white p-3 rounded-xl border border-amber-200 shadow-2xs">
+              <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
+                <span>{t.amountInTons}</span>
+                <span className="text-[10px] text-amber-600 font-mono">1 Ton = 1000 Kg</span>
+              </label>
+              <div className="relative">
+                <input type="number" step="any" min="0" value={convTons} onChange={(e) => handleTonsChange(e.target.value)} placeholder="1" className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-base font-bold font-mono text-slate-900 focus:outline-none focus:border-amber-600"/>
+                <span className="absolute end-3 top-2.5 text-xs font-bold text-slate-400">{t.tons}</span>
+              </div>
+            </div>
+
+            {/* Bags Input */}
+            <div className="bg-white p-3 rounded-xl border border-amber-200 shadow-2xs">
+              <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
+                <span>{t.amountInBags}</span>
+                <span className="text-[10px] text-amber-600 font-mono">1 Bag = 50 Kg</span>
+              </label>
+              <div className="relative">
+                <input type="number" step="any" min="0" value={convBags} onChange={(e) => handleBagsChange(e.target.value)} placeholder="20" className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-base font-bold font-mono text-slate-900 focus:outline-none focus:border-amber-600"/>
+                <span className="absolute end-3 top-2.5 text-xs font-bold text-slate-400">{t.bags}</span>
+              </div>
+            </div>
+
+            {/* Kg Input */}
+            <div className="bg-white p-3 rounded-xl border border-amber-200 shadow-2xs">
+              <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
+                <span>{t.amountInKg}</span>
+                <span className="text-[10px] text-amber-600 font-mono">Standard Weight</span>
+              </label>
+              <div className="relative">
+                <input type="number" step="any" min="0" value={convKg} onChange={(e) => handleKgChange(e.target.value)} placeholder="1000" className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-base font-bold font-mono text-slate-900 focus:outline-none focus:border-amber-600"/>
+                <span className="absolute end-3 top-2.5 text-xs font-bold text-slate-400">{t.kilos}</span>
+              </div>
+            </div>
+          </div>
+        </div>)}
+
+      {/* Main Grid: Recipe Builder (2 Cols) + Live Cost Calculator (1 Col) */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Formula Recipe Builder Form (2 Columns) */}
+        <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+          <div className="flex items-center mb-4 pb-3 border-b border-slate-100">
+            <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+              <Scale className="w-5 h-5 text-amber-600"/>
+              <span>{t.recipeBuilderTitle}</span>
+            </h3>
+          </div>
+
+          <form onSubmit={handleProduce} className="space-y-4">
+            <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
+              <span className="w-6 h-6 rounded-full bg-amber-600 text-white flex items-center justify-center">1</span>
+              <span>{t.formulaDetailsStep}</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  {t.formulaNameLabel}
+                </label>
+                <input type="text" required value={formulaName} onChange={(e) => setFormulaName(e.target.value)} placeholder={t.formulaNamePlaceholder} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-amber-600 shadow-2xs"/>
+              </div>
+
+              {/* Batch Production Expenses Input */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1">
+                  <Zap className="w-3.5 h-3.5 text-amber-600"/>
+                  <span>{t.batchProductionExpense} ({batchExpenseCurrency})</span>
+                </label>
+                <select value={batchExpenseCurrency} onChange={(e) => setBatchExpenseCurrency(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm font-bold mb-2"><option value="AFN">AFN</option><option value="USD">USD</option></select><input type="number" min="0" step="any" value={batchExpenses} onChange={(e) => setBatchExpenses(e.target.value)} placeholder="0" className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm text-slate-900 font-mono focus:outline-none focus:border-amber-600 shadow-2xs"/>
+              </div>
+            </div>
+
+            <button type="button" onClick={() => setShowOptionalDetails(value => !value)} className="text-xs font-semibold text-slate-600 hover:text-amber-700 flex items-center gap-1.5">
+              {showOptionalDetails ? <ChevronUp className="w-3.5 h-3.5"/> : <ChevronDown className="w-3.5 h-3.5"/>}
+              {t.optionalFormulaDetails}
+            </button>
+            {showOptionalDetails && <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-3 rounded-xl bg-slate-50 border border-slate-200">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">{t.operatorNameLabel}</label>
+                <input type="text" value={operatorName} onChange={(e) => setOperatorName(e.target.value)} placeholder={t.operatorPlaceholder} className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-amber-600"/>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">{t.formulaDescriptionLabel}</label>
+                <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} placeholder={t.formulaDescPlaceholder} className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-amber-600"/>
+              </div>
+            </div>}
+
+            {/* Ingredients Table / Rows */}
+            <div className="mt-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-700 flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-full bg-amber-600 text-white flex items-center justify-center">2</span>
+                  {t.rawItemsInBatch}
+                </label>
+                <button type="button" onClick={handleAddIngredientRow} className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer">
+                  <Plus className="w-3.5 h-3.5"/>
+                  <span>{t.addRawIngredient}</span>
+                </button>
+              </div>
+
+              <div className="space-y-2.5">
+                {ingredients.map((ing, idx) => {
+            const selectedRaw = db.rawMaterials.find(r => r.id === ing.rawMaterialId);
+            const cost = selectedRaw ? selectedRaw.unitPrice * (Number(ing.weightKg) || 0) : 0;
+            const requiredForProduction = (Number(ing.weightKg) || 0) * productionScale;
+            const isInsufficient = selectedRaw && requestedProductionKg > 0 && selectedRaw.stockKg < requiredForProduction;
+            return (<div key={idx} className={`p-3 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${isInsufficient ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-200'}`}>
+                      <div className="flex-1 min-w-0">
+                        <label className="block text-[10px] text-slate-500 mb-1">{t.selectRawIndex} #{idx + 1}</label>
+                        <RawMaterialCombobox
+                          key={`${idx}-${loadedFormulaId || 'new'}`}
+                          materials={db.rawMaterials}
+                          value={ing.rawMaterialId}
+                          onChange={(value) => handleUpdateIngredient(idx, 'rawMaterialId', value)}
+                          getLocalizedName={getLocalizedName}
+                          kiloLabel={t.kilo}
+                          lang={lang}
+                        />
+                      </div>
+
+                      <div className="w-full sm:w-36">
+                        <label className="block text-[10px] text-slate-500 mb-1">{t.weightKgLabel}</label>
+                        <input type="number" min="0.001" step="any" value={ing.weightKg} onChange={(e) => handleUpdateIngredient(idx, 'weightKg', e.target.value)} className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 font-mono focus:outline-none focus:border-amber-600 shadow-2xs"/>
+                      </div>
+
+                      <div className="w-full sm:w-32 text-end sm:pt-4">
+                        <span className="text-[10px] text-slate-500 block">{t.itemCostTotal}</span>
+                        <span className="text-xs font-bold text-amber-700 font-mono">
+                          {cost.toLocaleString()} {selectedRaw?.currency || 'AFN'}
+                        </span>
+                        {requestedProductionKg > 0 && <span className={`block text-[10px] font-mono mt-1 ${isInsufficient ? 'text-rose-700 font-bold' : 'text-slate-500'}`}>{t.requiredForBatch}: {requiredForProduction.toLocaleString(undefined, { maximumFractionDigits: 3 })} {t.kilo}</span>}
+                      </div>
+
+                      <div className="sm:pt-4">
+                        <button type="button" onClick={() => handleRemoveIngredientRow(idx)} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer">
+                          <Trash2 className="w-4 h-4"/>
+                        </button>
+                      </div>
+                    </div>);
+        })}
+              </div>
+            </div>
+
+            <div className="pt-4 border-t border-slate-100">
+              <div className="flex items-center gap-2 text-xs font-bold text-slate-700 mb-3">
+                <span className="w-6 h-6 rounded-full bg-amber-600 text-white flex items-center justify-center">3</span>
+                <span>{t.saveOrProduceStep}</span>
+              </div>
+              <div className="mb-4 p-4 rounded-xl border border-amber-200 bg-amber-50">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-amber-950 mb-1">{t.productionAmount}</label>
+                    <input required type="text" inputMode="decimal" value={productionQuantity} onChange={(event) => setProductionQuantity(normalizeDecimalInput(event.target.value))} placeholder="20" className="w-full bg-white border border-amber-300 rounded-xl px-3 py-2 text-sm font-mono font-bold focus:outline-none focus:border-amber-600"/>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-amber-950 mb-1">{t.productionUnit}</label>
+                    <select value={productionUnit} onChange={(event) => setProductionUnit(event.target.value)} className="w-full bg-white border border-amber-300 rounded-xl px-3 py-2 text-sm font-bold"><option value="kg">{t.kilos}</option><option value="bag">{t.bags}</option><option value="ton">{t.tons}</option></select>
+                  </div>
+                </div>
+                <div className="mt-3 text-xs text-amber-900">
+                  <strong>{t.actualBatchWeight}: {requestedProductionKg.toLocaleString()} {t.kilo}</strong>
+                  <span className="block mt-1">{t.productionScale}: {productionScale.toLocaleString(undefined, { maximumFractionDigits: 4 })}× · {t.formulaRemainsUnchanged}</span>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-start justify-end gap-2">
+              <div className="flex flex-col items-stretch sm:items-end">
+                <button type="button" onClick={handleSaveFormula} className="px-5 py-3 rounded-xl bg-white hover:bg-amber-50 text-amber-800 border border-amber-300 font-bold text-sm transition-all flex items-center justify-center gap-2 cursor-pointer">
+                  <Bookmark className="w-4 h-4"/>
+                  <span>{loadedFormulaId
+                      ? (lang === 'fa' ? 'به‌روزرسانی فرمول' : lang === 'ps' ? 'فورمول تازه کول' : 'Update formula')
+                      : (lang === 'fa' ? 'ذخیره فرمول' : lang === 'ps' ? 'فورمول خوندي کول' : 'Save formula')}</span>
+                </button>
+                {message && <p className={`mt-2 text-xs font-semibold ${message.type === 'success' ? 'text-emerald-700' : 'text-rose-700'}`} role="status">{message.text}</p>}
+              </div>
+              <div className="flex flex-col items-stretch sm:items-end">
+                <button type="submit" disabled={isProducing} className="px-6 py-3 rounded-xl bg-amber-600 hover:bg-amber-700 disabled:bg-amber-400 disabled:cursor-wait text-white font-bold text-sm shadow-md shadow-amber-600/25 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95">
+                  <PackageCheck className="w-4 h-4"/>
+                  <span>{isProducing ? (lang === 'fa' ? 'در حال ذخیره...' : lang === 'ps' ? 'د خوندي کولو په حال کې...' : 'Saving...') : t.produceFeedBtn}</span>
+                </button>
+                {processStatus && <p className={`mt-2 text-xs font-semibold ${processStatus.type === 'success' ? 'text-emerald-700' : 'text-rose-700'}`} role="status">{processStatus.text}</p>}
+              </div>
+              </div>
+            </div>
+          </form>
+        </div>
+
+        {/* Real-time Calculation Panel (1 Column) - Multi-Unit (Tons, Bags, Kg) */}
+        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between space-y-6 lg:sticky lg:top-24 self-start">
+          <div>
+            <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2 pb-3 border-b border-slate-100">
+              <DollarSign className="w-4 h-4 text-emerald-600"/>
+              <span>{t.autoCostCalcTon}</span>
+            </h3>
+
+            <div className="space-y-3 mt-4">
+              {/* Total Weight in Tons & Kilo */}
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
+                <span className="text-xs text-slate-500 block">{t.actualBatchWeight}:</span>
+                <div className="text-2xl font-black font-mono text-slate-900 mt-1 flex items-baseline gap-2">
+                  <span>{totalTons.toFixed(3)}</span>
+                  <span className="text-sm font-bold text-amber-700">{t.tons}</span>
+                </div>
+                <div className="text-xs text-slate-600 mt-1.5 font-mono font-medium flex items-center gap-2 pt-1 border-t border-slate-200">
+                  <span className="bg-slate-200/80 px-2 py-0.5 rounded text-slate-800 font-bold">
+                    {requestedProductionKg.toLocaleString()} {t.kilo}
+                  </span>
+                  <span>•</span>
+                  <span className="bg-amber-100 px-2 py-0.5 rounded text-amber-800 font-bold">
+                    {totalBags.toLocaleString()} {t.bags}
+                  </span>
+                </div>
+              </div>
+
+              {/* Raw Material Cost & Batch Expenses */}
+              <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs">
+                <div className="flex justify-between items-center text-slate-600">
+                  <span>{t.rawMaterialsCost}</span>
+                  <span className="font-mono font-bold">{scaledRawMaterialCost.AFN.toLocaleString()} AFN · {scaledRawMaterialCost.USD.toLocaleString()} USD</span>
+                </div>
+                {batchExpenseAmount > 0 && (<div className="flex justify-between items-center text-amber-700 mt-1.5 pt-1.5 border-t border-slate-200">
+                    <span>{t.prodExpensesSub}</span>
+                    <span className="font-mono font-bold">+{batchExpenseAmount.toLocaleString()} {batchExpenseCurrency}</span>
+                  </div>)}
+                <div className="flex justify-between items-center text-slate-900 font-bold mt-2 pt-2 border-t border-slate-300">
+                  <span>{t.totalBatchCost}:</span>
+                  <span className="font-mono text-cyan-700">{totalBatchCost.AFN.toLocaleString()} AFN · {totalBatchCost.USD.toLocaleString()} USD</span>
+                </div>
+              </div>
+
+              {/* Comprehensive Cost Rate per Unit: TON, BAG, KG */}
+              <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-200 space-y-2">
+                <div>
+                  <span className="text-xs font-semibold text-emerald-800 block">
+                    {t.costPerTonResult}:
+                  </span>
+                  <div className="text-2xl font-black font-mono text-emerald-800 mt-0.5">
+                    {costPerTon.AFN.toLocaleString(undefined, { maximumFractionDigits: 1 })} AFN · {costPerTon.USD.toLocaleString(undefined, { maximumFractionDigits: 2 })} USD
+                    <span className="text-xs font-medium text-emerald-700 ms-1">/ {t.tons}</span>
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-emerald-200 grid grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <span className="text-[10px] text-emerald-700 block">{t.costPerBag50kg}</span>
+                    <strong className="font-mono text-emerald-900 text-sm">
+                      {costPerBag.AFN.toFixed(0)} AFN · {costPerBag.USD.toFixed(2)} USD
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-emerald-700 block">{t.costPerKgShort}</span>
+                    <strong className="font-mono text-emerald-900 text-sm">
+                      {costPerKg.AFN.toFixed(2)} AFN · {costPerKg.USD.toFixed(4)} USD
+                    </strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-[11px] text-slate-600 flex items-start gap-2">
+            <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5"/>
+            <span>
+              {t.costTransferNotice}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Processed Feed Stock Section with Multi-Unit View (Tons, Bags, Kg) */}
+      <div className="order-2 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+        {/* Section Header & Unit Selector */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+          <div className="flex items-center gap-2">
+            <div className="p-2 bg-emerald-100 text-emerald-700 rounded-xl">
+              <PackageCheck className="w-5 h-5"/>
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-900">
+                {t.processedStockTitleTons}
+              </h3>
+              <p className="text-xs text-slate-500">
+                {t.processedStockSubtitle}
+              </p>
+            </div>
+          </div>
+
+          {/* Unit Selector Tabs */}
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-semibold">
+            <button type="button" onClick={() => setStockViewUnit('all')} className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${stockViewUnit === 'all'
+            ? 'bg-white text-slate-900 shadow-xs font-bold'
+            : 'text-slate-600 hover:text-slate-900'}`}>
+              {t.allUnits}
+            </button>
+            <button type="button" onClick={() => setStockViewUnit('ton')} className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${stockViewUnit === 'ton'
+            ? 'bg-amber-600 text-white shadow-xs font-bold'
+            : 'text-slate-600 hover:text-slate-900'}`}>
+              {t.inTons}
+            </button>
+            <button type="button" onClick={() => setStockViewUnit('bag')} className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${stockViewUnit === 'bag'
+            ? 'bg-amber-600 text-white shadow-xs font-bold'
+            : 'text-slate-600 hover:text-slate-900'}`}>
+              {t.inBags}
+            </button>
+            <button type="button" onClick={() => setStockViewUnit('kg')} className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${stockViewUnit === 'kg'
+            ? 'bg-amber-600 text-white shadow-xs font-bold'
+            : 'text-slate-600 hover:text-slate-900'}`}>
+              {t.inKg}
+            </button>
+          </div>
+        </div>
+
+        {/* Global Processed Stock Overview Banners */}
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+          <div className="p-3.5 rounded-xl bg-amber-50/70 border border-amber-200">
+            <span className="text-[11px] font-semibold text-amber-800 block">{t.totalStockInTons}</span>
+            <div className="text-xl font-bold font-mono text-amber-900 mt-1">
+              {totalProcessedTons.toFixed(2)} {t.tons}
+            </div>
+            <span className="text-[10px] text-amber-700">{t.equivalentMetricTon}</span>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
+            <span className="text-[11px] font-semibold text-slate-600 block">{t.totalInBags50kg}</span>
+            <div className="text-xl font-bold font-mono text-slate-900 mt-1">
+              {totalProcessedBags.toLocaleString()} {t.bags}
+            </div>
+            <span className="text-[10px] text-slate-500">{t.bagsPerTonRule}</span>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
+            <span className="text-[11px] font-semibold text-slate-600 block">{t.totalInKg}</span>
+            <div className="text-xl font-bold font-mono text-slate-900 mt-1">
+              {totalProcessedKg.toLocaleString()} {t.kilos}
+            </div>
+            <span className="text-[10px] text-slate-500">{t.totalWarehouseWeight}</span>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-emerald-50/70 border border-emerald-200">
+            <span className="text-[11px] font-semibold text-emerald-800 block">{t.totalProcessedStockValue}</span>
+            <div className="text-xl font-bold font-mono text-emerald-900 mt-1">
+              {totalProcessedValue.AFN.toLocaleString()} AFN · {totalProcessedValue.USD.toLocaleString()} USD
+            </div>
+            <span className="text-[10px] text-emerald-700">{db.processedStock.length} {t.readyFeedTypes}</span>
+          </div>
+        </div>
+
+        {/* Processed Stock Items List */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pt-2">
+          {db.processedStock.map(p => {
+            const bags = Math.round((p.stockKg / 50) * 100) / 100;
+            const tons = p.stockKg / 1000;
+            const ratePerTon = { AFN: (p.averageCostPerKg || 0) * 1000, USD: (p.averageCostPerKgUsd || 0) * 1000 };
+            const ratePerBag = { AFN: (p.averageCostPerKg || 0) * 50, USD: (p.averageCostPerKgUsd || 0) * 50 };
+            return (<div key={p.id} className="p-4 rounded-xl border border-slate-200 bg-white hover:border-amber-300 transition-all shadow-2xs flex flex-col justify-between">
+                <div>
+                  <div className="flex items-start justify-between gap-2">
+                    <h4 className="font-bold text-slate-900 text-sm">
+                      {getLocalizedName(p.name)}
+                    </h4>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                      {tons.toFixed(2)} {t.tons}
+                    </span>
+                  </div>
+
+                  {/* Stock Quantity Display according to selected view unit */}
+                  <div className="mt-3 p-3 bg-slate-50 rounded-xl border border-slate-100 space-y-1.5">
+                    {stockViewUnit === 'ton' && (<div>
+                        <span className="text-[10px] text-slate-500 block">{t.processedStockInTons}:</span>
+                        <div className="text-2xl font-black font-mono text-amber-800">
+                          {tons.toFixed(2)} <span className="text-xs font-semibold">{t.tons}</span>
+                        </div>
+                        <div className="text-[11px] text-slate-500 font-mono mt-0.5">
+                          {t.equivalentTonRate} {bags.toLocaleString()} {t.bags} • {p.stockKg.toLocaleString()} {t.kilo}
+                        </div>
+                      </div>)}
+
+                    {stockViewUnit === 'bag' && (<div>
+                        <span className="text-[10px] text-slate-500 block">{t.inBags}:</span>
+                        <div className="text-2xl font-black font-mono text-slate-900">
+                          {bags.toLocaleString()} <span className="text-xs font-semibold">{t.bags}</span>
+                        </div>
+                        <div className="text-[11px] text-slate-500 font-mono mt-0.5">
+                          {t.equivalentTonRate} {tons.toFixed(2)} {t.tons} • {p.stockKg.toLocaleString()} {t.kilo}
+                        </div>
+                      </div>)}
+
+                    {stockViewUnit === 'kg' && (<div>
+                        <span className="text-[10px] text-slate-500 block">{t.inKg}:</span>
+                        <div className="text-2xl font-black font-mono text-slate-900">
+                          {p.stockKg.toLocaleString()} <span className="text-xs font-semibold">{t.kilos}</span>
+                        </div>
+                        <div className="text-[11px] text-slate-500 font-mono mt-0.5">
+                          {t.equivalentTonRate} {tons.toFixed(2)} {t.tons} • {bags.toLocaleString()} {t.bags}
+                        </div>
+                      </div>)}
+
+                    {stockViewUnit === 'all' && (<div className="grid grid-cols-3 gap-2 text-center">
+                        <div className="p-2 rounded-lg bg-amber-50 border border-amber-200">
+                          <span className="text-[10px] text-amber-800 block font-semibold">{t.inTons}</span>
+                          <span className="font-bold font-mono text-amber-900 text-sm">{tons.toFixed(2)}</span>
+                        </div>
+                        <div className="p-2 rounded-lg bg-white border border-slate-200">
+                          <span className="text-[10px] text-slate-500 block font-semibold">{t.inBags}</span>
+                          <span className="font-bold font-mono text-slate-900 text-sm">{bags.toLocaleString()}</span>
+                        </div>
+                        <div className="p-2 rounded-lg bg-white border border-slate-200">
+                          <span className="text-[10px] text-slate-500 block font-semibold">{t.inKg}</span>
+                          <span className="font-bold font-mono text-slate-900 text-sm">{p.stockKg.toLocaleString()}</span>
+                        </div>
+                      </div>)}
+                  </div>
+
+                  {/* Production Cost Rates Breakdown */}
+                  <div className="mt-3 pt-2 border-t border-slate-100 text-xs space-y-1">
+                    <div className="flex justify-between items-center text-slate-600">
+                      <span className="font-medium">{t.costPerTon}:</span>
+                      <span className="font-mono font-bold text-amber-800">
+                        {ratePerTon.AFN.toLocaleString(undefined, { maximumFractionDigits: 1 })} AFN · {ratePerTon.USD.toLocaleString(undefined, { maximumFractionDigits: 2 })} USD
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center text-slate-600">
+                      <span className="font-medium">{t.costPerBag50kg}</span>
+                      <span className="font-mono font-bold text-slate-800">
+                        {ratePerBag.AFN.toFixed(0)} AFN · {ratePerBag.USD.toFixed(2)} USD
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center text-slate-600">
+                      <span className="font-medium">{t.costPerKgShort}</span>
+                      <span className="font-mono font-bold text-slate-800">
+                        {(p.averageCostPerKg || 0).toFixed(2)} AFN · {(p.averageCostPerKgUsd || 0).toFixed(4)} USD
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-3 pt-2 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-400">
+                  <span>{t.date}: {p.lastUpdated}</span>
+                  <span className="font-mono">ID: {p.id.slice(-6)}</span>
+                </div>
+              </div>);
+        })}
+        </div>
+      </div>
+
+      {/* Saved Formulated Items Section with Delete Option & Tons */}
+      <div className="order-1 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+        <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2 mb-4">
+          <Layers className="w-4 h-4 text-amber-600"/>
+          <span>{t.savedFormulasWithTons}</span>
+        </h3>
+
+        {db.formulas.length === 0 ? (<p className="text-xs text-slate-500 p-4 text-center">{t.noFormulaRegistered}</p>) : (<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {db.formulas.map(f => {
+                const formulaWeightKg = Number(f.totalWeightKg) || 0;
+                const formulaTons = formulaWeightKg / 1000;
+                const formulaBags = Math.round((formulaWeightKg / 50) * 100) / 100;
+                const costTon = { AFN: (f.costPerKg || 0) * 1000, USD: (f.costPerKgUsd || 0) * 1000 };
+                const costBag = { AFN: (f.costPerKg || 0) * 50, USD: (f.costPerKgUsd || 0) * 50 };
+                return (<div key={f.id} className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 hover:bg-slate-50 transition-colors flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-start justify-between gap-2">
+                      <h4 className="font-bold text-slate-900 text-sm">{f.name}</h4>
+                      <button type="button" onClick={() => setFormulaToDelete(f.id)} className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer" title={t.deleteFormula}>
+                        <Trash2 className="w-4 h-4"/>
+                      </button>
+                    </div>
+                    {f.description && (<p className="text-xs text-slate-600 mt-1">{f.description}</p>)}
+                    <div className="mt-3 pt-2 border-t border-slate-200/60 space-y-1.5 text-xs">
+                      <div className="flex justify-between text-slate-600">
+                        <span>{t.totalFormulaWeight}:</span>
+                        <span className="font-mono font-bold text-slate-800">
+                          {formulaTons.toFixed(2)} {t.tons} ({formulaWeightKg.toLocaleString()} kg • {formulaBags} {t.bags})
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-slate-600">
+                        <span>{t.costPerTon}:</span>
+                        <span className="font-mono font-bold text-emerald-700">
+                          {costTon.AFN.toLocaleString(undefined, { maximumFractionDigits: 1 })} AFN · {costTon.USD.toLocaleString(undefined, { maximumFractionDigits: 2 })} USD
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-slate-600">
+                        <span>{t.costPerBag50kg} / {t.costPerKgShort}</span>
+                        <span className="font-mono font-semibold text-slate-700">
+                          {costBag.AFN.toFixed(0)} AFN · {costBag.USD.toFixed(2)} USD / {(f.costPerKg || 0).toFixed(2)} AFN · {(f.costPerKgUsd || 0).toFixed(4)} USD
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-slate-600">
+                        <span>{t.totalBatchCost}:</span>
+                        <span className="font-mono font-bold text-slate-800">
+                          {(f.totalBatchCost || 0).toLocaleString()} AFN · {(f.totalBatchCostUsd || 0).toLocaleString()} USD
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 pt-2 border-t border-slate-200 text-[11px] text-slate-400">
+                    {t.date}: {f.createdDate}
+                  </div>
+                  <button type="button" onClick={() => handleLoadFormula(f)} className="mt-3 w-full px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-sm shadow-sm transition-colors cursor-pointer flex items-center justify-center gap-2">
+                    <FolderOpen className="w-5 h-5"/>
+                    <span>{t.loadFormula}</span>
+                  </button>
+                </div>);
+            })}
+          </div>)}
+      </div>
+
+      {/* Recent Production Batches with Tons */}
+      <div className="order-3 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+        <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2 mb-3">
+          <CalendarClock className="w-4 h-4 text-amber-600"/>
+          <span>{t.productionHistoryTons}</span>
+        </h3>
+
+        <div className="space-y-2.5">
+          {db.productionBatches.slice(0, 8).map(b => {
+            const batchTons = b.totalWeightKg / 1000;
+            const batchBags = Math.round((b.totalWeightKg / 50) * 100) / 100;
+            return (<div key={b.id} className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                <div>
+                  <h4 className="font-bold text-slate-900">{getLocalizedName(b.formulaName)}</h4>
+                  <span className="text-[11px] text-slate-500">
+                    {t.date}: {b.date} {b.operatorName ? `• ${t.operatorNameLabel}: ${b.operatorName}` : ''}
+                  </span>
+                </div>
+                <div className="text-end">
+                  <span className="font-bold font-mono text-slate-900 text-sm block">
+                    {batchTons.toFixed(2)} {t.tons}
+                  </span>
+                  <span className="text-[11px] text-slate-500 font-mono">
+                    {batchBags} {t.bags} • {b.totalWeightKg.toLocaleString()} {t.kilo}
+                  </span>
+                </div>
+              </div>);
+        })}
+        </div>
+      </div>
+
+      {/* In-app Confirmation Modal for Deleting Formula */}
+      {formulaToDelete && (<div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl border border-slate-200 text-center">
+            <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto mb-4">
+              <Trash2 className="w-6 h-6"/>
+            </div>
+            <h3 className="text-base font-bold text-slate-900 mb-2">
+              {t.deleteFormula}
+            </h3>
+            <p className="text-xs text-slate-600 mb-6">
+              {t.confirmDeleteFormula}
+            </p>
+            <div className="flex gap-3">
+              <button type="button" onClick={() => setFormulaToDelete(null)} className="flex-1 py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer">
+                {t.cancelBtn}
+              </button>
+              <button type="button" onClick={handleConfirmDeleteFormula} className="flex-1 py-2.5 rounded-xl bg-rose-600 text-xs font-bold text-white hover:bg-rose-700 transition-colors cursor-pointer">
+                {t.deleteFormulaConfirmBtn}
+              </button>
+            </div>
+          </div>
+        </div>)}
+    </div>);
+};
+
+const normalizeSearch = (value) => value?.toLocaleLowerCase().trim() || '';
+
+const RawMaterialCombobox = ({ materials, value, onChange, getLocalizedName, kiloLabel, lang }) => {
+    const selected = materials.find(material => material.id === value);
+    const selectedName = selected ? getLocalizedName(selected.name) : '';
+    const [query, setQuery] = useState(selectedName);
+    const [isOpen, setIsOpen] = useState(false);
+
+    const matches = useMemo(() => {
+        const keyword = normalizeSearch(query);
+        if (!keyword)
+            return materials.slice(0, 20);
+        return materials
+            .map((material, index) => {
+                const localizedName = normalizeSearch(getLocalizedName(material.name));
+                const storedName = normalizeSearch(material.name);
+                const searchableName = `${localizedName} ${storedName}`;
+                let score = 3;
+                if (localizedName === keyword || storedName === keyword)
+                    score = 0;
+                else if (localizedName.startsWith(keyword) || storedName.startsWith(keyword))
+                    score = 1;
+                else if (searchableName.includes(keyword))
+                    score = 2;
+                return { material, score, index };
+            })
+            .filter(result => result.score < 3)
+            .sort((a, b) => a.score - b.score || a.index - b.index)
+            .slice(0, 20)
+            .map(result => result.material);
+    }, [materials, query, getLocalizedName]);
+
+    const placeholder = lang === 'fa' ? 'نام مواد خام را بنویسید...' : lang === 'ps' ? 'د خامو موادو نوم ولیکئ...' : 'Type a raw material name...';
+    const noResults = lang === 'fa' ? 'مواد نزدیک به جستجو پیدا نشد.' : lang === 'ps' ? 'ورته خام مواد ونه موندل شول.' : 'No matching raw material found.';
+
+    return (<div className="relative">
+      <Search className="absolute start-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none"/>
+      <input
+        type="text"
+        value={query}
+        placeholder={placeholder}
+        onFocus={() => setIsOpen(true)}
+        onBlur={() => setTimeout(() => setIsOpen(false), 150)}
+        onChange={(event) => {
+            setQuery(event.target.value);
+            setIsOpen(true);
+            if (event.target.value !== selectedName)
+                onChange('');
+        }}
+        className="w-full bg-white border border-slate-300 rounded-lg ps-8 pe-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-amber-600 shadow-2xs font-medium"
+      />
+      {isOpen && (<div className="absolute z-30 mt-1 w-full max-h-56 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl">
+        {matches.length ? matches.map(material => (<button
+          key={material.id}
+          type="button"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => {
+              onChange(material.id);
+              setQuery(getLocalizedName(material.name));
+              setIsOpen(false);
+          }}
+          className="w-full flex items-center justify-between gap-3 px-3 py-2 text-start hover:bg-amber-50 border-b border-slate-100 last:border-0"
+        >
+          <span className="text-xs font-semibold text-slate-800 truncate">{getLocalizedName(material.name)}</span>
+          <span className="flex items-center gap-2 shrink-0 text-[10px] text-slate-500 font-mono">
+            {material.stockKg.toLocaleString()} {kiloLabel}
+            {material.id === value && <Check className="w-3.5 h-3.5 text-amber-700"/>}
+          </span>
+        </button>)) : <div className="px-3 py-4 text-center text-xs text-slate-500">{noResults}</div>}
+      </div>)}
+    </div>);
+};
