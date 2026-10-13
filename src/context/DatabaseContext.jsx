@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useRef } from 'r
 import { translations, getLocalizedTransactionType, getLocalizedTransactionDescription } from '../translations';
 import { supabase, supabaseConfigurationError } from '../lib/supabase';
 import { clearAllDataFromSupabase, deleteCustomerFromSupabase, deleteExpenseFromSupabase, deleteFormulaFromSupabase, deleteRawMaterialFromSupabase, deleteSupplierFromSupabase, loadFactorySettings, loadStateFromSupabase, persistStateChanges, saveLowStockThreshold, writeStateToSupabase } from '../lib/supabaseData';
-const LANG_STORAGE_KEY = 'al_makkah_poultry_feed_lang';
+const LANG_STORAGE_KEY = 'rayan_poultry_feed_lang';
 const emptyFactoryData = {
     rawMaterials: [],
     processedStock: [],
@@ -1232,7 +1232,7 @@ export const DatabaseProvider = ({ children }) => {
         const jsonString = `data:text/json;charset=utf-8,${encodeURIComponent(JSON.stringify(db, null, 2))}`;
         const downloadAnchor = document.createElement('a');
         downloadAnchor.setAttribute('href', jsonString);
-        downloadAnchor.setAttribute('download', `al_makkah_poultry_feed_backup_${new Date().toISOString().split('T')[0]}.json`);
+        downloadAnchor.setAttribute('download', `rayan_poultry_feed_backup_${new Date().toISOString().split('T')[0]}.json`);
         document.body.appendChild(downloadAnchor);
         downloadAnchor.click();
         downloadAnchor.remove();

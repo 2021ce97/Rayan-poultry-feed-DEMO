@@ -1,7 +1,7 @@
 export const translations = {
     "fa": {
-        "companyName": "شرکت تولیدی دانه مرغ المکه",
-        "companySubtitle": "سیستم جامع مدیریت و دیتابیس کارخانه تولید دانه مرغ المکه",
+        "companyName": "شرکت تولیدی دانه مرغ رایان",
+        "companySubtitle": "سیستم جامع مدیریت و دیتابیس کارخانه تولید دانه مرغ رایان",
         "companyPhone": "0780 001 923",
         "companyPhoneRaw": "0780001923",
         "companyPhoneLabel": "شماره تماس کارخانه:",
@@ -9,7 +9,7 @@ export const translations = {
         "dir": "rtl",
         "langName": "دری",
         "loginTitle": "ورود به سیستم مدیریت کارخانه",
-        "loginSubtitle": "سیستم اختصاصی کنترل تولید، موجودی، فروشات و حسابداری المکه",
+        "loginSubtitle": "سیستم اختصاصی کنترل تولید، موجودی، فروشات و حسابداری رایان",
         "emailLabel": "ایمیل یا نام کاربری",
         "passwordLabel": "رمز عبور",
         "loginBtn": "ورود به حساب کاربری",
@@ -505,7 +505,7 @@ export const translations = {
         "costRateVisibilityToggle": "نمایش/مخفی‌سازی نرخ تمام‌شد و سود برای حفظ حریم خصوصی"
     },
     "ps": {
-        "companyName": "المکه د چرګانود دانی تولیدي شرکت",
+        "companyName": "رایان د چرګانو د دانې تولیدي شرکت",
         "companySubtitle": "د چرګانو دانې تولیدي فابریکې جامع مدیریتي ډیټابیس او سیسټم",
         "companyPhone": "0780 001 923",
         "companyPhoneRaw": "0780001923",
@@ -514,7 +514,7 @@ export const translations = {
         "dir": "rtl",
         "langName": "پښتو",
         "loginTitle": "د فابریکې مدیریت سیسټم ته ننوتل",
-        "loginSubtitle": "د المکه د چرګانو د دانې تولیدي شرکت د تولید، زېرمې او مالي چارو کنټرول سیسټم",
+        "loginSubtitle": "د رایان د چرګانو د دانې تولیدي شرکت د تولید، زېرمې او مالي چارو کنټرول سیسټم",
         "emailLabel": "برېښنالیک یا کارن نوم",
         "passwordLabel": "پټ نوم (پاسورډ)",
         "loginBtn": "سیسټم ته ننوتل",
@@ -1010,7 +1010,7 @@ export const translations = {
         "costRateVisibilityToggle": "د محرمیت لپاره د تمام شوي نرخ او ګټې ښودل/پټول"
     },
     "en": {
-        "companyName": "Al-Makkah Poultry Feed Manufacturing Co.",
+        "companyName": "Rayan Poultry Feed Manufacturing Company",
         "companySubtitle": "Poultry Feed Production, Inventory & Sales ERP Database",
         "companyPhone": "0780 001 923",
         "companyPhoneRaw": "0780001923",
@@ -1019,7 +1019,7 @@ export const translations = {
         "dir": "ltr",
         "langName": "English",
         "loginTitle": "Factory Management System Login",
-        "loginSubtitle": "Authorized portal for Al-Makkah feed production, inventory & financial control",
+        "loginSubtitle": "Authorized portal for Rayan poultry feed production, inventory & financial control",
         "emailLabel": "Email or Username",
         "passwordLabel": "Password",
         "loginBtn": "Sign In to System",

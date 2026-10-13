@@ -1,4 +1,4 @@
--- Destructive baseline migration for the Al-Makka factory application.
+-- Destructive baseline migration for the Rayan Poultry Feed Manufacturing Company application.
 -- Supabase Auth (auth.*) is intentionally preserved.
 
 begin;

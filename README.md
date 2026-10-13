@@ -1,4 +1,4 @@
-# Al-Makka Poultry Feed Factory
+# Rayan Poultry Feed Manufacturing Company
 
 React/Vite factory management application backed by Supabase Auth, Postgres,
 and Row Level Security. The browser reads from and writes to Supabase directly;
