@@ -11,7 +11,7 @@ Copy `.env.example` to `.env` and set `VITE_SUPABASE_URL` plus
 database access is restricted to authenticated Supabase users by Row Level
 Security.
 
-## Database migrations
+## Database migrations.
 
 Migrations are stored in `supabase/migrations` in execution order:
 
