@@ -93,7 +93,7 @@ export const LoginPage = () => {
                   <div className="absolute inset-y-0 start-0 flex items-center ps-3.5 pointer-events-none text-slate-400">
                     <Mail className="w-4 h-4"/>
                   </div>
-                  <input type="text" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Rayan@poletry.af" className="w-full bg-slate-50 border border-slate-300 rounded-xl py-2.5 ps-10 pe-4 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-amber-600 focus:ring-1 focus:ring-amber-600 transition-colors shadow-2xs"/>
+                  <input type="text" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="rayandemo" autoComplete="username" className="w-full bg-slate-50 border border-slate-300 rounded-xl py-2.5 ps-10 pe-4 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-amber-600 focus:ring-1 focus:ring-amber-600 transition-colors shadow-2xs"/>
                 </div>
               </div>
 
@@ -110,7 +110,7 @@ export const LoginPage = () => {
                   <div className="absolute inset-y-0 start-0 flex items-center ps-3.5 pointer-events-none text-slate-400">
                     <Lock className="w-4 h-4"/>
                   </div>
-                  <input type={showPassword ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" className="w-full bg-slate-50 border border-slate-300 rounded-xl py-2.5 ps-10 pe-4 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-amber-600 focus:ring-1 focus:ring-amber-600 transition-colors shadow-2xs"/>
+                  <input type={showPassword ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" autoComplete="current-password" className="w-full bg-slate-50 border border-slate-300 rounded-xl py-2.5 ps-10 pe-4 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-amber-600 focus:ring-1 focus:ring-amber-600 transition-colors shadow-2xs"/>
                 </div>
               </div>
 

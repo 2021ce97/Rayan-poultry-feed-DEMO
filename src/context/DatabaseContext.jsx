@@ -1,8 +1,13 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { translations, getLocalizedTransactionType, getLocalizedTransactionDescription } from '../translations';
-import { supabase, supabaseConfigurationError } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
 import { clearAllDataFromSupabase, deleteCustomerFromSupabase, deleteExpenseFromSupabase, deleteFormulaFromSupabase, deleteRawMaterialFromSupabase, deleteSupplierFromSupabase, loadFactorySettings, loadStateFromSupabase, persistStateChanges, saveLowStockThreshold, writeStateToSupabase } from '../lib/supabaseData';
 const LANG_STORAGE_KEY = 'rayan_poultry_feed_lang';
+const LOCAL_AUTH_SESSION_KEY = 'rayan_poultry_feed_demo_session';
+const LOCAL_DATABASE_STORAGE_KEY = 'rayan_poultry_feed_local_database';
+const LOCAL_LOW_STOCK_STORAGE_KEY = 'rayan_poultry_feed_low_stock_threshold';
+const LOCAL_DEMO_USERNAME = 'rayandemo';
+const LOCAL_DEMO_PASSWORD = 'admin123';
 const emptyFactoryData = {
     rawMaterials: [],
     processedStock: [],
@@ -16,6 +21,26 @@ const emptyFactoryData = {
     cashInHandUsd: 0,
 };
 const DatabaseContext = createContext(undefined);
+const readLocalSession = () => {
+    try {
+        const session = JSON.parse(localStorage.getItem(LOCAL_AUTH_SESSION_KEY) || 'null');
+        return session?.username === LOCAL_DEMO_USERNAME ? session : null;
+    }
+    catch {
+        localStorage.removeItem(LOCAL_AUTH_SESSION_KEY);
+        return null;
+    }
+};
+const readLocalDatabase = () => {
+    try {
+        const saved = JSON.parse(localStorage.getItem(LOCAL_DATABASE_STORAGE_KEY) || 'null');
+        return saved && typeof saved === 'object' ? { ...emptyFactoryData, ...saved } : emptyFactoryData;
+    }
+    catch {
+        localStorage.removeItem(LOCAL_DATABASE_STORAGE_KEY);
+        return emptyFactoryData;
+    }
+};
 const currencyCode = value => value === 'USD' ? 'USD' : 'AFN';
 const normalizePartyName = value => String(value || '').normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
 const currencyField = (field, currency) => currencyCode(currency) === 'USD' ? field + 'Usd' : field;
@@ -107,23 +132,27 @@ export const DatabaseProvider = ({ children }) => {
         const saved = localStorage.getItem(LANG_STORAGE_KEY);
         return (saved === 'fa' || saved === 'ps' || saved === 'en') ? saved : 'fa';
     });
-    // Authentication is managed by Supabase Auth. A local-only login cannot
-    // validate users created in the Supabase dashboard.
-    const [user, setUser] = useState(null);
-    const [isAuthLoading, setIsAuthLoading] = useState(Boolean(supabase));
-    const [isDatabaseLoading, setIsDatabaseLoading] = useState(Boolean(supabase));
+    const [restoredLocalSession] = useState(readLocalSession);
+    const [user, setUser] = useState(restoredLocalSession);
+    const [isLocalSession, setIsLocalSession] = useState(Boolean(restoredLocalSession));
+    const [isAuthLoading, setIsAuthLoading] = useState(Boolean(supabase) && !restoredLocalSession);
+    const [isDatabaseLoading, setIsDatabaseLoading] = useState(Boolean(supabase) && !restoredLocalSession);
     const [isSupabaseConnected, setIsSupabaseConnected] = useState(false);
-    const [databaseError, setDatabaseError] = useState(supabase ? null : `Supabase configuration error: ${supabaseConfigurationError || 'unknown configuration problem'}`);
+    const [databaseError, setDatabaseError] = useState(null);
     const isRemoteStateReady = useRef(false);
     const lastSyncedState = useRef(null);
     const persistedStateRef = useRef(null);
     const pendingStateRef = useRef(null);
     const manualLogoutRef = useRef(false);
     // User-defined Low Stock Threshold
-    const [lowStockThreshold, setLowStockThresholdState] = useState(5000);
+    const [lowStockThreshold, setLowStockThresholdState] = useState(() => Math.max(100, Number(localStorage.getItem(LOCAL_LOW_STOCK_STORAGE_KEY)) || 5000));
     const setLowStockThreshold = (threshold) => {
         const safeVal = Math.max(100, Number(threshold) || 1000);
         setLowStockThresholdState(safeVal);
+        if (isLocalSession) {
+            localStorage.setItem(LOCAL_LOW_STOCK_STORAGE_KEY, String(safeVal));
+            return;
+        }
         if (supabase && user) {
             void saveLowStockThreshold(safeVal).then(saved => {
                 if (!saved) {
@@ -136,7 +165,7 @@ export const DatabaseProvider = ({ children }) => {
             });
         }
     };
-    const [db, setDb] = useState(emptyFactoryData);
+    const [db, setDb] = useState(readLocalDatabase);
     useEffect(() => {
         const handleDatabaseError = event => {
             const message = String(event.detail || 'An unknown Supabase error occurred.');
@@ -171,7 +200,7 @@ export const DatabaseProvider = ({ children }) => {
         };
     };
     useEffect(() => {
-        if (!supabase) { setIsAuthLoading(false); setIsDatabaseLoading(false); return; }
+        if (isLocalSession || !supabase) { setIsAuthLoading(false); setIsDatabaseLoading(false); return; }
         let isMounted = true;
         const restoreSession = async () => {
             let { data, error } = await supabase.auth.getSession();
@@ -203,12 +232,12 @@ export const DatabaseProvider = ({ children }) => {
             setIsAuthLoading(false);
         });
         return () => { isMounted = false; listener.subscription.unsubscribe(); };
-    }, []);
+    }, [isLocalSession]);
     // Load once after authentication. The browser talks directly to Supabase;
     // deliberately do not subscribe to broad Realtime changes or refetch on
     // focus/visibility, since either pattern redownloads the complete database.
     useEffect(() => {
-        if (!supabase || isAuthLoading || !user?.email) {
+        if (isLocalSession || !supabase || isAuthLoading || !user?.email) {
             setIsSupabaseConnected(false);
             if (!isAuthLoading) setIsDatabaseLoading(false);
             return;
@@ -251,9 +280,13 @@ export const DatabaseProvider = ({ children }) => {
         return () => {
             isMounted = false;
         };
-    }, [isAuthLoading, user?.email]);
+    }, [isAuthLoading, isLocalSession, user?.email]);
     // Persist completed state changes. Failed writes remain pending and retry automatically.
     useEffect(() => {
+        if (isLocalSession) {
+            localStorage.setItem(LOCAL_DATABASE_STORAGE_KEY, JSON.stringify(db));
+            return;
+        }
         if (!supabase || !isRemoteStateReady.current) return;
         const stateHash = JSON.stringify(db);
         if (lastSyncedState.current === stateHash) return;
@@ -280,7 +313,7 @@ export const DatabaseProvider = ({ children }) => {
         };
         void saveWithRetry();
         return () => { cancelled = true; };
-    }, [db]);
+    }, [db, isLocalSession]);
     // Keep HTML lang & direction in sync
     useEffect(() => {
         localStorage.setItem(LANG_STORAGE_KEY, lang);
@@ -293,8 +326,26 @@ export const DatabaseProvider = ({ children }) => {
     };
     const t = translations[lang];
     const login = async (emailInput, passwordInput) => {
+        const username = emailInput.trim().toLowerCase();
+        if (username === LOCAL_DEMO_USERNAME && passwordInput === LOCAL_DEMO_PASSWORD) {
+            const localUser = {
+                username: LOCAL_DEMO_USERNAME,
+                email: LOCAL_DEMO_USERNAME,
+                name: 'Rayan Demo',
+                role: 'Administrator',
+                loginTime: new Date().toISOString(),
+            };
+            localStorage.setItem(LOCAL_AUTH_SESSION_KEY, JSON.stringify(localUser));
+            setDatabaseError(null);
+            setIsSupabaseConnected(false);
+            setIsAuthLoading(false);
+            setIsDatabaseLoading(false);
+            setIsLocalSession(true);
+            setUser(localUser);
+            return { success: true };
+        }
         if (!supabase) {
-            return { success: false, error: `Supabase configuration error: ${supabaseConfigurationError || 'unknown configuration problem'}` };
+            return { success: false, error: t.invalidCredentials };
         }
         setDatabaseError(null);
         const { error } = await supabase.auth.signInWithPassword({
@@ -304,9 +355,12 @@ export const DatabaseProvider = ({ children }) => {
         return error ? { success: false, error: error.message } : { success: true };
     };
     const logout = async () => {
+        const wasLocalSession = isLocalSession;
+        localStorage.removeItem(LOCAL_AUTH_SESSION_KEY);
         setUser(null);
+        setIsLocalSession(false);
         isRemoteStateReady.current = false;
-        if (supabase) {
+        if (supabase && !wasLocalSession) {
             const { error } = await supabase.auth.signOut();
             if (error)
                 console.error('Supabase logout failed:', error.message);
